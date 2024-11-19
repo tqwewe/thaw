@@ -1,5 +1,9 @@
 # Button
 
+A button triggers an action or event when activated.
+
+### Default
+
 ```rust demo
 view! {
     <Space>
@@ -134,6 +138,38 @@ view! {
 }
 ```
 
+### Loading
+
+```rust demo
+let loading = RwSignal::new(false);
+let on_click = move |_| {
+    loading.set(true);
+    set_timeout(
+        move || {
+            loading.set(false);
+        },
+        std::time::Duration::from_secs(5),
+    );
+};
+
+view! {
+    <Space>
+        <Button loading on_click icon=icondata::AiCloseOutlined>
+            "Start loading"
+        </Button>
+        <Button loading on_click>
+            "Start loading"
+        </Button>
+        <Button loading on_click size=ButtonSize::Small>
+            "Start loading"
+        </Button>
+        <Button loading on_click size=ButtonSize::Large>
+            "Start loading"
+        </Button>
+    </Space>
+}
+```
+
 ### Block
 
 ```rust demo
@@ -166,13 +202,14 @@ view! {
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
 | class | `MaybeProp<String>` | `Default::default()` |  |
-| appearance | `MaybeSignal<ButtonAppearance>` | `Default::default()` | A button can have its content and borders styled for greater emphasis or to be subtle. |
-| shape | `MaybeSignal<ButtonShape>` | `Default::default()` | A button can be rounded, circular, or square. |
-| size | `MaybeSignal<ButtonSize>` | `ButtonSize::Medium` | A button supports different sizes. |
-| block | `MaybeSignal<bool>` | `false` | Whether the button is displayed as block. |
+| appearance | `Signal<ButtonAppearance>` | `Default::default()` | A button can have its content and borders styled for greater emphasis or to be subtle. |
+| shape | `Signal<ButtonShape>` | `Default::default()` | A button can be rounded, circular, or square. |
+| size | `Option<Signal<ButtonSize>>` | `ButtonSize::Medium` | A button supports different sizes. |
+| block | `Signal<bool>` | `false` | Whether the button is displayed as block. |
 | icon | `MaybeProp<icondata_core::Icon>` | `None` | The icon of the button. |
-| disabled | `MaybeSignal<bool>` | `false` | Whether the button is disabled. |
-| disabled_focusable | `MaybeSignal<bool>` | `false` | When set, allows the button to be focusable even when it has been disabled. |
+| disabled | `Signal<bool>` | `false` | Whether the button is disabled. |
+| disabled_focusable | `Signal<bool>` | `false` | When set, allows the button to be focusable even when it has been disabled. |
+| loading | `Signal<bool>` | `false` | Whether the button shows the loading status. |
 | on_click | `Option<BoxOneCallback<ev::MouseEvent>>` | `None` | Listen for button click events. |
 | children | `Option<Children>` |  |  |
 
