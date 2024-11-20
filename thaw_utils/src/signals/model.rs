@@ -2,6 +2,7 @@ mod option_model;
 mod vec_model;
 
 pub use option_model::{OptionModel, OptionModelWithValue};
+use reactive_stores::{Field, StoreField};
 pub use vec_model::{VecModel, VecModelWithValue};
 
 use leptos::prelude::*;
@@ -11,10 +12,58 @@ where
     T: 'static,
     S: Storage<T>,
 {
-    read: Signal<T, S>,
-    write: WriteSignal<T, S>,
+    read: ModelRead<T, S>,
+    write: ModelWrite<T, S>,
     on_write: Option<WriteSignal<T, S>>,
 }
+
+enum ModelRead<T, S>
+where
+    T: 'static,
+    S: Storage<T>,
+{
+    Signal(Signal<T, S>),
+    Field(Field<T, S>),
+}
+
+impl<T, S> Clone for ModelRead<T, S>
+where
+    T: 'static,
+    S: Storage<T>,
+{
+    fn clone(&self) -> Self {
+        match self {
+            ModelRead::Signal(signal) => ModelRead::Signal(*signal),
+            ModelRead::Field(field) => ModelRead::Field(*field),
+        }
+    }
+}
+
+impl<T, S> Copy for ModelRead<T, S> where S: Storage<T> {}
+
+enum ModelWrite<T, S>
+where
+    T: 'static,
+    S: Storage<T>,
+{
+    Signal(WriteSignal<T, S>),
+    Field(Field<T, S>),
+}
+
+impl<T, S> Clone for ModelWrite<T, S>
+where
+    T: 'static,
+    S: Storage<T>,
+{
+    fn clone(&self) -> Self {
+        match self {
+            ModelWrite::Signal(signal) => ModelWrite::Signal(*signal),
+            ModelWrite::Field(field) => ModelWrite::Field(*field),
+        }
+    }
+}
+
+impl<T, S> Copy for ModelWrite<T, S> where S: Storage<T> {}
 
 impl<T: Default + Send + Sync> Default for Model<T> {
     fn default() -> Self {
@@ -39,8 +88,14 @@ impl<T: Send + Sync> Model<T> {
         rw_signal.into()
     }
 
-    pub fn signal(&self) -> Signal<T> {
-        self.read
+    pub fn signal(&self) -> Signal<T>
+    where
+        T: Clone,
+    {
+        match self.read {
+            ModelRead::Signal(signal) => signal,
+            ModelRead::Field(field) => Signal::derive(move || field.get()),
+        }
     }
 }
 
@@ -49,7 +104,10 @@ where
     S: Storage<T>,
 {
     fn defined_at(&self) -> Option<&'static std::panic::Location<'static>> {
-        self.read.defined_at()
+        match self.read {
+            ModelRead::Signal(signal) => signal.defined_at(),
+            ModelRead::Field(field) => field.defined_at(),
+        }
     }
 }
 
@@ -57,7 +115,10 @@ impl<T: Send + Sync> With for Model<T> {
     type Value = T;
 
     fn try_with<O>(&self, f: impl FnOnce(&Self::Value) -> O) -> Option<O> {
-        self.read.try_with(f)
+        match self.read {
+            ModelRead::Signal(signal) => signal.try_with(f),
+            ModelRead::Field(field) => field.try_with(f),
+        }
     }
 }
 
@@ -65,19 +126,32 @@ impl<T: Send + Sync> WithUntracked for Model<T> {
     type Value = T;
 
     fn try_with_untracked<O>(&self, f: impl FnOnce(&Self::Value) -> O) -> Option<O> {
-        self.read.try_with_untracked(f)
+        match self.read {
+            ModelRead::Signal(signal) => signal.try_with_untracked(f),
+            ModelRead::Field(field) => field.try_with_untracked(f),
+        }
     }
 }
 
 // TODO
-impl<T: Send + Sync + Clone> Update for Model<T> {
+impl<T: Send + Sync + Clone> Update for Model<T>
+// where
+//     Field<T>: Update<Value = T>,
+{
     type Value = T;
 
     fn try_maybe_update<U>(&self, fun: impl FnOnce(&mut Self::Value) -> (bool, U)) -> Option<U> {
-        let value = self.write.try_maybe_update(fun);
+        let value = match self.write {
+            ModelWrite::Signal(signal) => signal.try_maybe_update(fun),
+            ModelWrite::Field(field) => field.writer().map(|mut field| fun(&mut *field).1), // TODO: This is wrong, and always updates the value regardless of the returned bool
+        };
 
         if let Some(on_write) = self.on_write.as_ref() {
-            on_write.set(self.read.with_untracked(|read| read.clone()));
+            let v = match self.read {
+                ModelRead::Signal(signal) => signal.get_untracked(),
+                ModelRead::Field(field) => field.get_untracked(),
+            };
+            on_write.set(v);
         }
 
         value
@@ -89,7 +163,10 @@ where
     S: Storage<T>,
 {
     fn is_disposed(&self) -> bool {
-        self.write.is_disposed()
+        match self.write {
+            ModelWrite::Signal(signal) => signal.is_disposed(),
+            ModelWrite::Field(field) => field.is_disposed(),
+        }
     }
 }
 
@@ -103,8 +180,21 @@ impl<T: Send + Sync> From<RwSignal<T>> for Model<T> {
     fn from(rw_signal: RwSignal<T>) -> Self {
         let (read, write) = rw_signal.split();
         Self {
-            read: read.into(),
-            write,
+            read: ModelRead::Signal(read.into()),
+            write: ModelWrite::Signal(write),
+            on_write: None,
+        }
+    }
+}
+
+impl<T, S> From<Field<T, S>> for Model<T, S>
+where
+    S: Storage<T>,
+{
+    fn from(field: Field<T, S>) -> Self {
+        Self {
+            read: ModelRead::Field(field),
+            write: ModelWrite::Field(field),
             on_write: None,
         }
     }
@@ -116,8 +206,8 @@ where
 {
     fn from((read, write): (Signal<T, S>, WriteSignal<T, S>)) -> Self {
         Self {
-            read,
-            write,
+            read: ModelRead::Signal(read),
+            write: ModelWrite::Signal(write),
             on_write: None,
         }
     }
@@ -126,8 +216,8 @@ where
 impl<T: Send + Sync> From<(ReadSignal<T>, WriteSignal<T>)> for Model<T> {
     fn from((read, write): (ReadSignal<T>, WriteSignal<T>)) -> Self {
         Self {
-            read: read.into(),
-            write,
+            read: ModelRead::Signal(read.into()),
+            write: ModelWrite::Signal(write),
             on_write: None,
         }
     }
@@ -136,8 +226,8 @@ impl<T: Send + Sync> From<(ReadSignal<T>, WriteSignal<T>)> for Model<T> {
 impl<T: Send + Sync> From<(Memo<T>, WriteSignal<T>)> for Model<T> {
     fn from((read, write): (Memo<T>, WriteSignal<T>)) -> Self {
         Self {
-            read: read.into(),
-            write,
+            read: ModelRead::Signal(read.into()),
+            write: ModelWrite::Signal(write),
             on_write: None,
         }
     }

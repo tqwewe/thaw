@@ -2,6 +2,8 @@ use crate::Scrollbar;
 use leptos::{either::Either, prelude::*};
 use thaw_utils::class_list;
 
+use crate::Scrollbar;
+
 #[component]
 pub fn DrawerBody(
     #[prop(optional, into)] class: MaybeProp<String>,
